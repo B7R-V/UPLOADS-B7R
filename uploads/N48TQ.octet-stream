@@ -1,0 +1,1474 @@
+<?php
+
+ob_start();
+
+define('API_KEY', '8168628294:AAHMb5xQqqKUvQ0ksDioEtgYrEKb3GvB1UY');
+define('ADMIN_ID', '7651670227');
+define('OWNER_TEXT', 'NEXUS TEAM B7R 🦈');
+
+$dataPath = __DIR__ . '/data/';
+if (!is_dir($dataPath)) {
+    mkdir($dataPath, 0777, true);
+}
+
+$botData = [];
+$appData = [];
+$subscriptionData = [];
+$statsData = [];
+
+function loadData($file, &$target, $default = []) {
+    global $dataPath;
+    $path = $dataPath . $file;
+    if (file_exists($path)) {
+        $target = json_decode(file_get_contents($path), true) ?? $default;
+    } else {
+        $target = $default;
+    }
+}
+
+function saveData($file, $data) {
+    global $dataPath;
+    file_put_contents($dataPath . $file, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+loadData('bot.json', $botData);
+loadData('app.json', $appData);
+loadData('subscription.json', $subscriptionData);
+loadData('statistics.json', $statsData);
+
+function saveAll() {
+    global $botData, $appData, $subscriptionData, $statsData;
+    saveData('bot.json', $botData);
+    saveData('app.json', $appData);
+    saveData('subscription.json', $subscriptionData);
+    saveData('statistics.json', $statsData);
+}
+
+function bot($method, $datas = []) {
+    $url = "https://api.telegram.org/bot" . API_KEY . "/" . $method;
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $datas);
+    $res = curl_exec($ch);
+    curl_close($ch);
+    return json_decode($res);
+}
+
+function callAPI($action, $channelId, $userId = null, $number = 1) {
+    $apiUrl = 'https://abdomoh.serv00.net/api/eshterak_api.php';
+    $data = ['action' => $action, 'channel_id' => $channelId];
+    if ($action === 'check' && $userId !== null) {
+        $data['user_id'] = $userId;
+    }
+    if ($action === 'link') {
+        $data['number'] = $number;
+    }
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $apiUrl);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    $response = curl_exec($ch);
+    curl_close($ch);
+    return json_decode($response, true);
+}
+
+function sendMessage($text, $chatId, $token = API_KEY) {
+    $url = "https://api.telegram.org/bot{$token}/sendMessage?chat_id={$chatId}&text=" . urlencode($text) . "&parse_mode=markdown";
+    file_get_contents($url);
+}
+
+function isAdmin($userId) {
+    global $botData;
+    return $userId == ADMIN_ID || in_array($userId, $botData['admins'] ?? []);
+}
+
+function isVip($userId) {
+    global $botData;
+    return in_array($userId, $botData['promotionn'] ?? []);
+}
+
+function isBanned($userId) {
+    global $botData;
+    return in_array($userId, $botData['banned'] ?? []);
+}
+
+function checkFileContent($content) {
+    $patterns = [
+        '/H3K/',
+        '/public function create/',
+        '/(.*)ZipArchive(.*)/i',
+        '/(.*)zip(.*)/i',
+        '/(.*)eval(.*)/i',
+        '/(.*)file_put_contents(.*)/i',
+        '/(.*)file_get_contents(.*)/i',
+        '/(.*)echo(.*)/i',
+        '/(.*)base64_decode(.*)/i',
+        '/(.*)Hack Tool Hosting(.*)/i',
+        '/(.*)\.htaccess(.*)/i',
+        '/(.*)pantheonsite.io(.*)/i',
+    ];
+    foreach ($patterns as $pattern) {
+        if (preg_match($pattern, $content)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function getUserFolder($userId) {
+    return "all/{$userId}/";
+}
+
+function getCurrentFolder($userId) {
+    global $botData;
+    return getUserFolder($userId) . ($botData['from_folder'] ?? 'bots');
+}
+
+function getFileLink($fileName, $userId) {
+    $protocol = isset($_SERVER['HTTPS']) ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'];
+    $base = dirname($_SERVER['SCRIPT_NAME']);
+    return "{$protocol}://{$host}{$base}/" . getCurrentFolder($userId) . "/" . $fileName;
+}
+
+function createFolderIfNeeded($userId) {
+    $base = getUserFolder($userId);
+    if (!is_dir($base)) {
+        mkdir($base, 0777, true);
+    }
+    $current = getCurrentFolder($userId);
+    if (!is_dir($current)) {
+        mkdir($current, 0777, true);
+    }
+}
+
+function getFoldersList($userId) {
+    $base = getUserFolder($userId);
+    if (!is_dir($base)) return [];
+    $folders = [];
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($base, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+    foreach ($iterator as $item) {
+        if ($item->isDir()) {
+            $relative = str_replace($base, '', $item->getPathname());
+            $relative = ltrim($relative, '/');
+            $folders[] = str_replace('/', ' > ', $relative);
+        }
+    }
+    return $folders;
+}
+
+function getFileList($userId) {
+    $base = getUserFolder($userId);
+    if (!is_dir($base)) return [];
+    $items = [];
+    $iterator = new DirectoryIterator($base);
+    foreach ($iterator as $file) {
+        if ($file->isDot()) continue;
+        if ($file->isDir()) {
+            $items[] = "📂 " . $file->getFilename();
+        } else {
+            $items[] = "📄 " . $file->getFilename();
+        }
+    }
+    return $items;
+}
+
+function deleteFolderRecursive($path) {
+    if (!is_dir($path)) return false;
+    $files = array_diff(scandir($path), ['.', '..']);
+    foreach ($files as $file) {
+        $full = $path . DIRECTORY_SEPARATOR . $file;
+        if (is_dir($full)) {
+            deleteFolderRecursive($full);
+        } else {
+            unlink($full);
+        }
+    }
+    return rmdir($path);
+}
+
+function generateBroadcastCode($targets, $stabilizing, $directing, $fromId, $messageId, $chatId, $fileId, $caption, $method, $broadcastMsgId) {
+    $targetsExport = var_export($targets, true);
+    $fileIdExport = var_export($fileId, true);
+    $captionEscaped = addslashes($caption);
+    $methodEscaped = addslashes($method);
+    return <<<PHP
+<?php
+define('API_KEY', '$token');
+
+function bot(\$method, \$datas = []) {
+    \$url = "https://api.telegram.org/bot" . API_KEY . "/" . \$method;
+    \$ch = curl_init();
+    curl_setopt(\$ch, CURLOPT_URL, \$url);
+    curl_setopt(\$ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt(\$ch, CURLOPT_POSTFIELDS, \$datas);
+    \$res = curl_exec(\$ch);
+    curl_close(\$ch);
+    return json_decode(\$res);
+}
+\$targets = $targetsExport;
+\$fileId = $fileIdExport;
+\$caption = "$captionEscaped";
+\$method = "$methodEscaped";
+\$stabilizing = "$stabilizing";
+\$directing = "$directing";
+\$count = count(\$targets);
+\$blocked = 0;
+\$failed = 0;
+\$succeeded = 0;
+foreach (\$targets as \$target) {
+    try {
+        \$response = null;
+        if (\$directing == 'on') {
+            \$response = bot('forwardMessage', [
+                'chat_id' => \$target,
+                'from_chat_id' => $fromId,
+                'message_id' => $messageId
+            ]);
+        } else {
+            \$payload = ['chat_id' => \$target];
+            if (\$method !== 'sendmessage') {
+                \$type = str_replace('send', '', \$method);
+                \$payload[\$type] = \$fileId;
+                if (\$caption) \$payload['caption'] = \$caption;
+            } else {
+                \$payload['text'] = \$fileId;
+                \$payload['parse_mode'] = 'Markdown';
+            }
+            \$response = bot(\$method, \$payload);
+        }
+        if (!\$response || !\$response->ok) {
+            if (isset(\$response->error_code) && \$response->error_code == 403) {
+                \$blocked++;
+            } else {
+                \$failed++;
+            }
+        } else {
+            \$succeeded++;
+        }
+        \$percentage = round((\$succeeded / \$count) * 100, 2);
+        bot('editMessageText', [
+            'chat_id' => $chatId,
+            'message_id' => $broadcastMsgId,
+            'text' => "جاري الإذاعة…\n• الإجمالي: {\$count}\n• تم الإرسال: {\$succeeded}\n• محظور: {\$blocked}\n• النسبة: {\$percentage}%"
+        ]);
+    } catch (Exception \$e) {
+        error_log("Broadcast error: " . \$e->getMessage());
+    }
+}
+bot('editMessageText', [
+    'chat_id' => $chatId,
+    'message_id' => $broadcastMsgId,
+    'text' => "✅ اكتملت الإذاعة\n• الإجمالي: {\$count}\n• تم الإرسال: {\$succeeded}\n• محظور: {\$blocked}\n• فشل: {\$failed}",
+    'parse_mode' => 'HTML'
+]);
+bot('sendMessage', [
+    'chat_id' => $fromId,
+    'text' => "• تم الإذاعة بنجاح\n• المستفيدون: {\$succeeded}\n• المحظورون: {\$blocked}\n• الفاشلون: {\$failed}\n• الإجمالي: {\$count}",
+    'parse_mode' => 'Markdown'
+]);
+unlink(__FILE__);
+?>
+PHP;
+}
+
+date_default_timezone_set('Africa/Cairo');
+
+$update = json_decode(file_get_contents('php://input'));
+
+$botInfo = bot('getme')->result;
+$botId = $botInfo->id;
+$botUser = $botInfo->username;
+$botName = $botInfo->first_name;
+
+$message = $update->message ?? null;
+$callback = $update->callback_query ?? null;
+
+$messageId = $message->message_id ?? $callback->message->message_id ?? null;
+$chatId = $message->chat->id ?? $callback->message->chat->id ?? null;
+$fromId = $message->from->id ?? $callback->from->id ?? null;
+$username = $message->from->username ?? $callback->from->username ?? null;
+$firstName = $message->from->first_name ?? $callback->from->first_name ?? null;
+$chatType = $message->chat->type ?? null;
+$text = $message->text ?? null;
+$caption = $message->caption ?? null;
+$data = $callback->data ?? null;
+
+$photo = $message->photo ?? null;
+$voice = $message->voice ?? null;
+$audio = $message->audio ?? null;
+$video = $message->video ?? null;
+$document = $message->document ?? null;
+$sticker = $message->sticker ?? null;
+$reply = $message->reply_to_message ?? null;
+
+$documentFileId = $document->file_id ?? null;
+$documentFileName = $document->file_name ?? null;
+
+if (!isset($botData['admins'])) $botData['admins'] = [];
+if (!in_array(ADMIN_ID, $botData['admins'])) {
+    $botData['admins'][] = ADMIN_ID;
+}
+if (!isset($botData['banned'])) $botData['banned'] = [];
+if (!isset($botData['promotionn'])) $botData['promotionn'] = [];
+if (!isset($botData['Info_uploads'])) $botData['Info_uploads'] = ['telegram' => 0, 'not_telegram' => 0, 'curl' => 0];
+if (!isset($botData['from_php'])) $botData['from_php'] = [];
+if (!isset($botData['from_json'])) $botData['from_json'] = [];
+if (!isset($botData['from_text'])) $botData['from_text'] = [];
+if (!isset($botData['from_ban'])) $botData['from_ban'] = [];
+if (!isset($botData['php'])) $botData['php'] = 0;
+if (!isset($botData['json'])) $botData['json'] = 0;
+if (!isset($botData['text'])) $botData['text'] = 0;
+if (!isset($botData['file'])) $botData['file'] = 0;
+if (!isset($botData['php_ban'])) $botData['php_ban'] = 0;
+if (!isset($botData['json_ban'])) $botData['json_ban'] = 0;
+if (!isset($botData['text_ban'])) $botData['text_ban'] = 0;
+if (!isset($botData['ban'])) $botData['ban'] = 0;
+if (!isset($botData['check'])) $botData['check'] = 'on';
+if (!isset($botData['upload'])) $botData['upload'] = 'on';
+if (!isset($botData['folder'])) $botData['folder'] = 'on';
+if (!isset($botData['from_folder'])) {
+    $botData['from_folder'] = 'bots';
+}
+if (!isset($botData['tak'])) $botData['tak'] = 'on';
+if (!isset($botData['tawgeh'])) $botData['tawgeh'] = 'on';
+if (!isset($botData['bott'])) $botData['bott'] = 'on';
+if (!isset($botData['premium'])) $botData['premium'] = 'off';
+if (!isset($botData['VIP_button'])) $botData['VIP_button'] = 'on';
+if (!isset($botData['numberfiles'])) $botData['numberfiles'] = 7;
+if (!isset($botData['numberban'])) $botData['numberban'] = 3;
+if (!isset($botData['stabilizing'])) $botData['stabilizing'] = 'off';
+if (!isset($botData['directing'])) $botData['directing'] = 'off';
+if (!isset($botData['radio_type'])) $botData['radio_type'] = 'Manufacturer';
+if (!isset($botData['radio_g_or_p'])) $botData['radio_g_or_p'] = 'private';
+if (!isset($appData['mode'])) $appData['mode'] = [];
+if (!isset($appData['twasol'])) $appData['twasol'] = [];
+if (!isset($appData['bot'])) $appData['bot'] = [];
+if (!isset($statsData['users'])) $statsData['users'] = [];
+if (!isset($statsData['groups'])) $statsData['groups'] = [];
+if (!isset($statsData['stats'])) {
+    $statsData['stats'] = [
+        'total_users' => 0,
+        'total_groups' => 0,
+        'today' => ['date' => date('Y-m-d'), 'users' => 0, 'groups' => 0],
+        'yesterday' => ['date' => date('Y-m-d', strtotime('-1 day')), 'users' => 0, 'groups' => 0],
+        'new_today' => 0,
+        'new_groups_today' => 0,
+    ];
+}
+if ($statsData['stats']['today']['date'] != date('Y-m-d')) {
+    $statsData['stats']['yesterday'] = $statsData['stats']['today'];
+    $statsData['stats']['today'] = ['date' => date('Y-m-d'), 'users' => 0, 'groups' => 0];
+    $statsData['stats']['new_today'] = 0;
+    $statsData['stats']['new_groups_today'] = 0;
+}
+
+createFolderIfNeeded($fromId ?? 0);
+
+if ($chatType === 'private' && $fromId && !in_array($fromId, $statsData['users'])) {
+    $statsData['users'][] = $fromId;
+    $statsData['stats']['total_users']++;
+    $statsData['stats']['today']['users']++;
+    $statsData['stats']['new_today']++;
+    bot('sendMessage', [
+        'chat_id' => ADMIN_ID,
+        'text' => "*🆕 مستخدم جديد*\nالاسم: [{$firstName}](tg://user?id={$fromId})\nالمعرف: @{$username}\nالايدي: `{$fromId}`",
+        'parse_mode' => 'markdown'
+    ]);
+    saveAll();
+}
+
+if (($chatType === 'group' || $chatType === 'supergroup') && $chatId && !in_array($chatId, $statsData['groups'])) {
+    $statsData['groups'][] = $chatId;
+    $statsData['stats']['total_groups']++;
+    $statsData['stats']['today']['groups']++;
+    $statsData['stats']['new_groups_today']++;
+    bot('sendMessage', [
+        'chat_id' => ADMIN_ID,
+        'text' => "*🆕 تم إضافة البوت إلى مجموعة جديدة*\nالاسم: {$chatId}\nالايدي: `{$chatId}`",
+        'parse_mode' => 'markdown'
+    ]);
+    saveAll();
+}
+
+if ($message && $fromId != ADMIN_ID && $botData['tawgeh'] === 'on' && $chatType === 'private') {
+    $forward = bot('forwardMessage', [
+        'chat_id' => ADMIN_ID,
+        'from_chat_id' => $fromId,
+        'message_id' => $messageId
+    ]);
+    $appData['twasol'][$forward->result->message_id] = $fromId;
+    saveAll();
+}
+
+if ($message && $fromId == ADMIN_ID && $reply && $text != 'ايدي' && isset($appData['twasol'][$reply->message_id])) {
+    $target = $appData['twasol'][$reply->message_id];
+    if ($text) {
+        bot('sendMessage', ['chat_id' => $target, 'text' => "رسالة من الدعم:\n{$text}", 'parse_mode' => 'markdown', 'protect_content' => true]);
+    } elseif ($photo) {
+        bot('sendPhoto', ['chat_id' => $target, 'photo' => $photo[0]->file_id, 'caption' => "رسالة من الدعم:\n{$caption}"]);
+    } elseif ($voice) {
+        bot('sendVoice', ['chat_id' => $target, 'voice' => $voice->file_id, 'caption' => "رسالة من الدعم:\n{$caption}"]);
+    } elseif ($audio) {
+        bot('sendAudio', ['chat_id' => $target, 'audio' => $audio->file_id, 'caption' => "رسالة من الدعم:\n{$caption}"]);
+    } elseif ($video) {
+        bot('sendVideo', ['chat_id' => $target, 'video' => $video->file_id, 'caption' => "رسالة من الدعم:\n{$caption}"]);
+    } elseif ($document) {
+        bot('sendDocument', ['chat_id' => $target, 'document' => $document->file_id, 'caption' => "رسالة من الدعم:\n{$caption}"]);
+    } elseif ($sticker) {
+        bot('sendSticker', ['chat_id' => $target, 'sticker' => $sticker->file_id]);
+    }
+    exit;
+}
+
+if ($reply && $fromId == ADMIN_ID && $text == 'ايدي' && isset($appData['twasol'][$reply->message_id])) {
+    $target = $appData['twasol'][$reply->message_id];
+    $info = bot('getChatMember', ['chat_id' => $target, 'user_id' => $target])->result;
+    $name = $info->user->first_name ?? '';
+    $user = $info->user->username ?? '';
+    $msg = "*User ID:* [{$target}](tg://openmessage?user_id={$target})\n*Username:* @{$user}\n*Name:* [{$name}](tg://user?id={$target})";
+    bot('sendMessage', ['chat_id' => $chatId, 'text' => $msg, 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'bot']]]])]);
+    exit;
+}
+
+if (($text == '/start' || $data == 'bot') && isAdmin($fromId)) {
+    $method = $data ? 'editMessageText' : 'sendMessage';
+    $markup = json_encode([
+        'inline_keyboard' => [
+            [['text' => 'تنبيه دخول الأعضاء ' . ($botData['tak'] === 'on' ? '✅' : '❌'), 'callback_data' => 'tak']],
+            [['text' => 'توجيه الرسائل ' . ($botData['tawgeh'] === 'on' ? '✅' : '❌'), 'callback_data' => 'tawgeh']],
+            [['text' => 'وضع البوت ' . ($botData['bott'] === 'on' ? '✅' : '❌'), 'callback_data' => 'bott']],
+            [['text' => 'الوضع المدفوع ' . ($botData['premium'] === 'on' ? '✅' : '❌'), 'callback_data' => 'premium']],
+            [['text' => 'قسم الحظر', 'callback_data' => 'ksmblock'], ['text' => 'قسم الادمنيه', 'callback_data' => 'ksmadmin']],
+            [['text' => 'قسم الإذاعة', 'callback_data' => 'msg']],
+            [['text' => 'الاشتراك الإجباري', 'callback_data' => 'eshterak']],
+            [['text' => 'الاشتراك VIP', 'callback_data' => 'ksmvip']],
+            [['text' => 'الإحصائيات', 'callback_data' => 'statistics']],
+            [['text' => 'إعدادات الرفع', 'callback_data' => 'abdo']]
+        ]
+    ]);
+    bot($method, [
+        'chat_id' => $chatId,
+        'message_id' => $messageId,
+        'text' => "مرحباً بك في لوحة التحكم\n" . OWNER_TEXT,
+        'parse_mode' => 'markdown',
+        'reply_markup' => $markup
+    ]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+}
+
+if ($data == 'premium' || $data == 'bott' || $data == 'tawgeh' || $data == 'tak') {
+    $key = $data;
+    $botData[$key] = $botData[$key] === 'on' ? 'off' : 'on';
+    saveAll();
+    bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => "تم " . ($botData[$key] === 'on' ? 'تفعيل' : 'تعطيل')]);
+    bot('editMessageReplyMarkup', ['chat_id' => $chatId, 'message_id' => $messageId, 'reply_markup' => json_encode([
+        'inline_keyboard' => [
+            [['text' => 'تنبيه دخول الأعضاء ' . ($botData['tak'] === 'on' ? '✅' : '❌'), 'callback_data' => 'tak']],
+            [['text' => 'توجيه الرسائل ' . ($botData['tawgeh'] === 'on' ? '✅' : '❌'), 'callback_data' => 'tawgeh']],
+            [['text' => 'وضع البوت ' . ($botData['bott'] === 'on' ? '✅' : '❌'), 'callback_data' => 'bott']],
+            [['text' => 'الوضع المدفوع ' . ($botData['premium'] === 'on' ? '✅' : '❌'), 'callback_data' => 'premium']],
+            [['text' => 'قسم الحظر', 'callback_data' => 'ksmblock'], ['text' => 'قسم الادمنيه', 'callback_data' => 'ksmadmin']],
+            [['text' => 'قسم الإذاعة', 'callback_data' => 'msg']],
+            [['text' => 'الاشتراك الإجباري', 'callback_data' => 'eshterak']],
+            [['text' => 'الاشتراك VIP', 'callback_data' => 'ksmvip']],
+            [['text' => 'الإحصائيات', 'callback_data' => 'statistics']],
+            [['text' => 'إعدادات الرفع', 'callback_data' => 'abdo']]
+        ]
+    ])]);
+    exit;
+}
+
+if ($data == 'statistics') {
+    $today = date('Y-m-d');
+    $yesterday = date('Y-m-d', strtotime('-1 day'));
+    $msg = "📊 الإحصائيات\n\n";
+    $msg .= "• المستخدمون الكلي: {$statsData['stats']['total_users']}\n";
+    $msg .= "• المجموعات الكلي: {$statsData['stats']['total_groups']}\n";
+    $msg .= "• اليوم ({$today}): {$statsData['stats']['today']['users']} مستخدم, {$statsData['stats']['today']['groups']} مجموعة\n";
+    $msg .= "• الأمس ({$yesterday}): {$statsData['stats']['yesterday']['users']} مستخدم, {$statsData['stats']['yesterday']['groups']} مجموعة\n";
+    $msg .= "• جدد اليوم: {$statsData['stats']['new_today']}\n";
+    $msg .= "• جدد الأمس: {$statsData['stats']['new_groups_today']}\n";
+    $recent = array_slice($statsData['users'], -5);
+    $msg .= "• آخر المستخدمين:\n" . implode("\n", $recent);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $msg, 'parse_mode' => 'html', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'bot']]]])]);
+    exit;
+}
+
+if ($data == 'ksmblock') {
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => 'حظر عضو', 'callback_data' => 'block']],
+        [['text' => 'إلغاء حظر', 'callback_data' => 'unblock']],
+        [['text' => 'عرض المحظورين', 'callback_data' => 'blocks']],
+        [['text' => 'حذف جميع المحظورين', 'callback_data' => 'unblocks']],
+        [['text' => 'رجوع', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => '🔒 قسم الحظر', 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'block' || $data == 'unblock') {
+    $mode = str_replace('block', '', $data);
+    $mode = $mode ? 'unblock' : 'block';
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "أرسل ايدي المستخدم لـ " . ($mode == 'block' ? 'حظره' : 'إلغاء حظره'), 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'ksmblock']]]])]);
+    $appData['mode'][$fromId]['mode'] = $mode;
+    saveAll();
+    exit;
+}
+
+if ($text && isAdmin($fromId) && in_array($appData['mode'][$fromId]['mode'] ?? '', ['block', 'unblock'])) {
+    $mode = $appData['mode'][$fromId]['mode'];
+    $id = trim($text);
+    if (preg_match('/\b\d{8,12}\b/', $id)) {
+        if ($mode == 'block') {
+            if (!in_array($id, $botData['banned'])) {
+                $botData['banned'][] = $id;
+                saveAll();
+                bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم حظر [المستخدم](tg://user?id={$id})", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmblock']]]])]);
+            } else {
+                bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ المستخدم محظور بالفعل.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmblock']]]])]);
+            }
+        } else {
+            $botData['banned'] = array_filter($botData['banned'], function($item) use ($id) { return $item != $id; });
+            saveAll();
+            bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم إلغاء حظر [المستخدم](tg://user?id={$id})", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmblock']]]])]);
+        }
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "❌ ايدي غير صحيح، حاول مرة أخرى.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'ksmblock']]]])]);
+    }
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'blocks') {
+    $list = '';
+    foreach ($botData['banned'] as $id) {
+        $list .= "ID: {$id}\n";
+    }
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "*المحظورين:*\n{$list}", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmblock']]]])]);
+    exit;
+}
+
+if ($data == 'unblocks') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⚠️ هل أنت متأكد من حذف جميع المحظورين؟", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [
+        [['text' => 'نعم', 'callback_data' => 'confirm_unblocks'], ['text' => 'إلغاء', 'callback_data' => 'ksmblock']]
+    ]])]);
+    exit;
+}
+
+if ($data == 'confirm_unblocks') {
+    $botData['banned'] = [];
+    saveAll();
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم حذف جميع المحظورين.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmblock']]]])]);
+    exit;
+}
+
+if ($data == 'ksmadmin') {
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => 'رفع ادمن', 'callback_data' => 'admins'], ['text' => 'حذف ادمن', 'callback_data' => 'unadmins']],
+        [['text' => 'عرض الادمنية', 'callback_data' => 'adminss']],
+        [['text' => 'حذف جميع الادمنية', 'callback_data' => 'unadminss']],
+        [['text' => 'رجوع', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => '👥 قسم الادمنية', 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'admins' || $data == 'unadmins') {
+    $mode = $data == 'admins' ? 'admins' : 'unadmins';
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "أرسل ايدي المستخدم " . ($mode == 'admins' ? 'لرفعه ادمن' : 'لحذف ادمنيته'), 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'ksmadmin']]]])]);
+    $appData['mode'][$fromId]['mode'] = $mode;
+    saveAll();
+    exit;
+}
+
+if ($text && isAdmin($fromId) && in_array($appData['mode'][$fromId]['mode'] ?? '', ['admins', 'unadmins'])) {
+    $mode = $appData['mode'][$fromId]['mode'];
+    $id = trim($text);
+    if (preg_match('/\b\d{8,12}\b/', $id)) {
+        if ($mode == 'admins') {
+            if (!in_array($id, $botData['admins'])) {
+                $botData['admins'][] = $id;
+                saveAll();
+                bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم رفع [المستخدم](tg://user?id={$id}) ادمن", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmadmin']]]])]);
+                bot('sendMessage', ['chat_id' => $id, 'text' => "تم رفعك ادمن في البوت بواسطة المطور."]);
+            } else {
+                bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ المستخدم بالفعل ادمن.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmadmin']]]])]);
+            }
+        } else {
+            $botData['admins'] = array_filter($botData['admins'], function($item) use ($id) { return $item != $id; });
+            saveAll();
+            bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم سحب الادمن من [المستخدم](tg://user?id={$id})", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmadmin']]]])]);
+            bot('sendMessage', ['chat_id' => $id, 'text' => "تم سحب الادمنية منك بواسطة المطور."]);
+        }
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "❌ ايدي غير صحيح، حاول مرة أخرى.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'ksmadmin']]]])]);
+    }
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'adminss') {
+    $list = '';
+    foreach ($botData['admins'] as $id) {
+        $info = bot('getChatMember', ['chat_id' => $id, 'user_id' => $id])->result;
+        $name = $info->user->first_name ?? '';
+        $user = $info->user->username ?? '';
+        $list .= "ID: {$id}\nUsername: @{$user}\nName: [{$name}](tg://user?id={$id})\n\n";
+    }
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "*الادمنية:*\n{$list}", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmadmin']]]])]);
+    exit;
+}
+
+if ($data == 'unadminss') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⚠️ هل أنت متأكد من حذف جميع الادمنية؟", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [
+        [['text' => 'نعم', 'callback_data' => 'confirm_unadminss'], ['text' => 'إلغاء', 'callback_data' => 'ksmadmin']]
+    ]])]);
+    exit;
+}
+
+if ($data == 'confirm_unadminss') {
+    $botData['admins'] = [];
+    saveAll();
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم حذف جميع الادمنية.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmadmin']]]])]);
+    exit;
+}
+
+if ($data == 'ksmvip') {
+    $vipButton = $botData['VIP_button'] === 'on' ? '✅' : '❌';
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => "زر التقديم على اشتراك VIP {$vipButton}", 'callback_data' => 'VIP_button']],
+        [['text' => 'إضافة VIP', 'callback_data' => 'addvip'], ['text' => 'حذف VIP', 'callback_data' => 'removevip']],
+        [['text' => 'عرض جميع VIP', 'callback_data' => 'viewvips']],
+        [['text' => 'حذف جميع VIP', 'callback_data' => 'clearvips']],
+        [['text' => 'رجوع', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => '⭐ قسم VIP', 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'VIP_button') {
+    $botData['VIP_button'] = $botData['VIP_button'] === 'on' ? 'off' : 'on';
+    saveAll();
+    bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => "تم " . ($botData['VIP_button'] === 'on' ? 'تفعيل' : 'تعطيل') . " زر الاشتراك"]);
+    $vipButton = $botData['VIP_button'] === 'on' ? '✅' : '❌';
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => '⭐ قسم VIP', 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [
+        [['text' => "زر التقديم على اشتراك VIP {$vipButton}", 'callback_data' => 'VIP_button']],
+        [['text' => 'إضافة VIP', 'callback_data' => 'addvip'], ['text' => 'حذف VIP', 'callback_data' => 'removevip']],
+        [['text' => 'عرض جميع VIP', 'callback_data' => 'viewvips']],
+        [['text' => 'حذف جميع VIP', 'callback_data' => 'clearvips']],
+        [['text' => 'رجوع', 'callback_data' => 'bot']]
+    ]])]);
+    exit;
+}
+
+if ($data == 'addvip' || $data == 'removevip') {
+    $mode = $data == 'addvip' ? 'addvip' : 'removevip';
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "أرسل ايدي المستخدم " . ($mode == 'addvip' ? 'لإضافته إلى VIP' : 'لحذفه من VIP'), 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'ksmvip']]]])]);
+    $appData['mode'][$fromId]['mode'] = $mode;
+    saveAll();
+    exit;
+}
+
+if ($text && isAdmin($fromId) && in_array($appData['mode'][$fromId]['mode'] ?? '', ['addvip', 'removevip'])) {
+    $mode = $appData['mode'][$fromId]['mode'];
+    $id = trim($text);
+    if (preg_match('/\b\d{8,12}\b/', $id)) {
+        if ($mode == 'addvip') {
+            if (!in_array($id, $botData['promotionn'])) {
+                $botData['promotionn'][] = $id;
+                saveAll();
+                bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم إضافة [المستخدم](tg://user?id={$id}) إلى VIP", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmvip']]]])]);
+            } else {
+                bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ المستخدم بالفعل في VIP.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmvip']]]])]);
+            }
+        } else {
+            $botData['promotionn'] = array_filter($botData['promotionn'], function($item) use ($id) { return $item != $id; });
+            saveAll();
+            bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم حذف [المستخدم](tg://user?id={$id}) من VIP", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmvip']]]])]);
+        }
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "❌ ايدي غير صحيح، حاول مرة أخرى.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'ksmvip']]]])]);
+    }
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'viewvips') {
+    $list = '';
+    foreach ($botData['promotionn'] as $id) {
+        $info = bot('getChatMember', ['chat_id' => $id, 'user_id' => $id])->result;
+        $name = $info->user->first_name ?? '';
+        $user = $info->user->username ?? '';
+        $list .= "ID: {$id}\nUsername: @{$user}\nName: [{$name}](tg://user?id={$id})\n\n";
+    }
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "*قائمة VIP:*\n{$list}", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmvip']]]])]);
+    exit;
+}
+
+if ($data == 'clearvips') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⚠️ هل أنت متأكد من حذف جميع VIP؟", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [
+        [['text' => 'نعم', 'callback_data' => 'confirm_clearvips'], ['text' => 'إلغاء', 'callback_data' => 'ksmvip']]
+    ]])]);
+    exit;
+}
+
+if ($data == 'confirm_clearvips') {
+    $botData['promotionn'] = [];
+    saveAll();
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم حذف جميع VIP.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'ksmvip']]]])]);
+    exit;
+}
+
+if ($data == 'vip') {
+    bot('sendMessage', ['chat_id' => ADMIN_ID, 'text' => "*✅ طلب اشتراك VIP*\nمن: [{$firstName}](tg://user?id={$fromId})\nايدي: {$fromId}", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [
+        [['text' => 'تفعيل', 'callback_data' => "trues|{$fromId}"], ['text' => 'رفض', 'callback_data' => "falses|{$fromId}"]]
+    ]])]);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم إرسال طلب الاشتراك إلى المطور.", 'parse_mode' => 'markdown']);
+    exit;
+}
+
+if (!empty($data) && (strpos($data, 'trues|') === 0 || strpos($data, 'falses|') === 0)) {
+    list($action, $userId) = explode('|', $data);
+    if ($action == 'trues') {
+        if (!in_array($userId, $botData['promotionn'])) {
+            $botData['promotionn'][] = $userId;
+            saveAll();
+        }
+        bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم قبول طلب الاشتراك للمستخدم [{$userId}](tg://user?id={$userId})", 'parse_mode' => 'markdown']);
+        bot('sendMessage', ['chat_id' => $userId, 'text' => "✅ تم تفعيل اشتراك VIP الخاص بك. أرسل /start للبدء."]);
+    } else {
+        bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "❌ تم رفض طلب الاشتراك للمستخدم [{$userId}](tg://user?id={$userId})", 'parse_mode' => 'markdown']);
+        bot('sendMessage', ['chat_id' => $userId, 'text' => "❌ تم رفض طلب الاشتراك الخاص بك. يمكنك التواصل مع المطور."]);
+    }
+    exit;
+}
+
+if ($botData['bott'] != 'on' && !isAdmin($fromId)) {
+    $method = $data ? 'editMessageText' : 'sendMessage';
+    bot($method, ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⏳ البوت في وضع الصيانة، يرجى الانتظار."]);
+    exit;
+}
+
+if ($botData['premium'] == 'on' && !isAdmin($fromId) && !isVip($fromId)) {
+    $method = $data ? 'editMessageText' : 'sendMessage';
+    $markup = null;
+    if ($botData['VIP_button'] == 'on') {
+        $markup = json_encode(['inline_keyboard' => [[['text' => 'طلب اشتراك VIP', 'callback_data' => 'vip']]]]);
+    }
+    bot($method, ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "💰 هذا البوت مدفوع، يرجى الاشتراك للاستخدام.", 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    exit;
+}
+
+if (!isAdmin($fromId) && !isVip($fromId) && !empty($subscriptionData)) {
+    $missing = [];
+    $subscribed = true;
+    foreach ($subscriptionData as $channelId => $required) {
+        $response = callAPI('check', $channelId, $fromId);
+        if (!$response['subscribed']) {
+            $missing[$channelId] = $required;
+            $subscribed = false;
+            if (!isset($appData[$channelId]['members'])) $appData[$channelId]['members'] = [];
+            if (!in_array($fromId, $appData[$channelId]['members'])) {
+                $appData[$channelId]['members'][] = $fromId;
+                saveAll();
+            }
+        } else {
+            if (isset($appData[$channelId]['members']) && in_array($fromId, $appData[$channelId]['members'])) {
+                unset($appData[$channelId]['members'][array_search($fromId, $appData[$channelId]['members'])]);
+                if (!isset($appData[$channelId]['nom'])) $appData[$channelId]['nom'] = 0;
+                $appData[$channelId]['nom']++;
+                saveAll();
+                $channelName = bot('getChat', ['chat_id' => $channelId])->result->title;
+                $current = $appData[$channelId]['nom'];
+                $msg = "✅ اشتراك جديد في قناة {$channelName}\nالاسم: {$firstName}\nالعدد: {$current}/{$required}";
+                if ($current >= $required) {
+                    $msg .= "\n✅ اكتمل العدد المطلوب لهذه القناة.";
+                    unset($subscriptionData[$channelId]);
+                    unset($appData[$channelId]);
+                    saveAll();
+                }
+                bot('sendMessage', ['chat_id' => ADMIN_ID, 'text' => $msg]);
+            }
+        }
+    }
+    if (!$subscribed) {
+        $buttons = [];
+        foreach ($missing as $channelId => $required) {
+            $chat = bot('getChat', ['chat_id' => $channelId]);
+            $name = $chat->result->title;
+            if (!isset($appData[$channelId]['link'])) {
+                $response = callAPI('link', $channelId, null, $required);
+                if (isset($response['link'])) {
+                    $appData[$channelId]['link'] = $response['link'];
+                    saveAll();
+                } else {
+                    bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ حدث خطأ في إنشاء رابط الدعوة، يرجى التواصل مع المطور."]);
+                    exit;
+                }
+            }
+            $buttons[] = [['text' => "اشترك في {$name}", 'url' => $appData[$channelId]['link']]];
+        }
+        $msg = "يرجى الاشتراك في القنوات التالية للمتابعة:";
+        $markup = json_encode(['inline_keyboard' => $buttons]);
+        if ($data) {
+            bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $msg, 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+        } else {
+            bot('sendMessage', ['chat_id' => $chatId, 'text' => $msg, 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+        }
+        exit;
+    }
+}
+
+if ($data == 'eshterak') {
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => '➕ إضافة قناة', 'callback_data' => 'esh'], ['text' => '➖ حذف قناة', 'callback_data' => 'unesh']],
+        [['text' => '👁 عرض القنوات', 'callback_data' => 'eshh']],
+        [['text' => '🗑 حذف جميع القنوات', 'callback_data' => 'uneshh']],
+        [['text' => 'رجوع', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => '📌 قسم الاشتراك الإجباري', 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'esh') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "أرسل معرف القناة (@username)، أو ايدي القناة، أو قم بتوجيه رسالة منها.", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'eshterak']]]])]);
+    $appData['mode'][$fromId]['mode'] = 'esh_step1';
+    saveAll();
+    exit;
+}
+
+if ($message && ($appData['mode'][$fromId]['mode'] ?? '') == 'esh_step1') {
+    $channelId = null;
+    if (strpos($text, '@') === 0) {
+        $info = bot('getChat', ['chat_id' => $text]);
+        if ($info->ok) $channelId = $info->result->id;
+    } elseif (is_numeric($text)) {
+        $channelId = '-100' . $text;
+    } elseif ($message->forward_from_chat) {
+        $channelId = $message->forward_from_chat->id;
+    }
+    if ($channelId) {
+        $appData['bot']['temp_channel_id'] = $channelId;
+        $name = bot('getChat', ['chat_id' => $channelId])->result->title;
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم التعرف على القناة: {$name}\nأرسل الآن عدد الاشتراكات المطلوب."]);
+        $appData['mode'][$fromId]['mode'] = 'esh_step2';
+        saveAll();
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "❌ لم أتمكن من استخراج ايدي القناة، حاول مرة أخرى."]);
+    }
+    exit;
+}
+
+if ($text && ($appData['mode'][$fromId]['mode'] ?? '') == 'esh_step2') {
+    if (is_numeric($text) && intval($text) > 0) {
+        $channelId = $appData['bot']['temp_channel_id'];
+        $subscriptionData[$channelId] = intval($text);
+        unset($appData['bot']['temp_channel_id']);
+        saveAll();
+        $name = bot('getChat', ['chat_id' => $channelId])->result->title;
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم إضافة القناة {$name} بعدد {$text} اشتراكات."]);
+        $appData['mode'][$fromId]['mode'] = null;
+        saveAll();
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ يرجى إرسال عدد صحيح موجب."]);
+    }
+    exit;
+}
+
+if ($data == 'unesh') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "أرسل معرف أو ايدي القناة المراد حذفها.", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'eshterak']]]])]);
+    $appData['mode'][$fromId]['mode'] = 'unesh';
+    saveAll();
+    exit;
+}
+
+if ($message && ($appData['mode'][$fromId]['mode'] ?? '') == 'unesh') {
+    $channelId = null;
+    if (strpos($text, '@') === 0) {
+        $info = bot('getChat', ['chat_id' => $text]);
+        if ($info->ok) $channelId = $info->result->id;
+    } elseif (is_numeric($text)) {
+        $channelId = '-100' . $text;
+    } elseif ($message->forward_from_chat) {
+        $channelId = $message->forward_from_chat->id;
+    }
+    if ($channelId && isset($subscriptionData[$channelId])) {
+        unset($subscriptionData[$channelId]);
+        saveAll();
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم حذف القناة من قائمة الاشتراك الإجباري."]);
+        $appData['mode'][$fromId]['mode'] = null;
+        saveAll();
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "❌ القناة غير موجودة في القائمة."]);
+    }
+    exit;
+}
+
+if ($data == 'eshh') {
+    $list = '';
+    if (!empty($subscriptionData)) {
+        foreach ($subscriptionData as $channelId => $count) {
+            $info = bot('getChat', ['chat_id' => $channelId]);
+            $name = $info->result->title ?? 'غير معروف';
+            $list .= "🔹 [{$name}](tg://user?id={$channelId}) - العدد: {$count}\n";
+        }
+    } else {
+        $list = "❌ لا توجد قنوات في الاشتراك الإجباري.";
+    }
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $list, 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'eshterak']]]])]);
+    exit;
+}
+
+if ($data == 'uneshh') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⚠️ هل أنت متأكد من حذف جميع قنوات الاشتراك الإجباري؟", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [
+        [['text' => 'نعم', 'callback_data' => 'confirm_uneshh'], ['text' => 'لا', 'callback_data' => 'eshterak']]
+    ]])]);
+    exit;
+}
+
+if ($data == 'confirm_uneshh') {
+    $subscriptionData = [];
+    saveAll();
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم حذف جميع القنوات.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'eshterak']]]])]);
+    exit;
+}
+
+if ($data == 'msg') {
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => 'تثبيت ' . ($botData['stabilizing'] === 'on' ? '✅' : '❌'), 'callback_data' => 'stabilizing']],
+        [['text' => 'توجيه ' . ($botData['directing'] === 'on' ? '✅' : '❌'), 'callback_data' => 'directing']],
+        [['text' => 'الإذاعة في ' . ($botData['radio_g_or_p'] === 'private' ? 'الخاص' : 'الجروبات'), 'callback_data' => 'radio_g_or_p']],
+        [['text' => 'بدء الإذاعة', 'callback_data' => 'start_radio']],
+        [['text' => 'رجوع', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => '📢 قسم الإذاعة', 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'stabilizing' || $data == 'directing' || $data == 'radio_g_or_p') {
+    $key = $data;
+    if ($key == 'stabilizing' || $key == 'directing') {
+        $botData[$key] = $botData[$key] === 'on' ? 'off' : 'on';
+    } elseif ($key == 'radio_g_or_p') {
+        $botData[$key] = $botData[$key] === 'private' ? 'group' : 'private';
+    }
+    saveAll();
+    bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => 'تم التحديث']);
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => 'تثبيت ' . ($botData['stabilizing'] === 'on' ? '✅' : '❌'), 'callback_data' => 'stabilizing']],
+        [['text' => 'توجيه ' . ($botData['directing'] === 'on' ? '✅' : '❌'), 'callback_data' => 'directing']],
+        [['text' => 'الإذاعة في ' . ($botData['radio_g_or_p'] === 'private' ? 'الخاص' : 'الجروبات'), 'callback_data' => 'radio_g_or_p']],
+        [['text' => 'بدء الإذاعة', 'callback_data' => 'start_radio']],
+        [['text' => 'رجوع', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageReplyMarkup', ['chat_id' => $chatId, 'message_id' => $messageId, 'reply_markup' => $markup]);
+    exit;
+}
+
+if ($data == 'start_radio') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "📨 أرسل الآن محتوى الإذاعة (نص، صورة، فيديو، مستند، إلخ).", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'msg']]]])]);
+    $appData['mode'][$fromId]['mode'] = 'waiting_for_message';
+    saveAll();
+    exit;
+}
+
+if ($message && ($appData['mode'][$fromId]['mode'] ?? '') == 'waiting_for_message') {
+    $targets = $botData['radio_g_or_p'] === 'private' ? $statsData['users'] : $statsData['groups'];
+    $method = 'sendmessage';
+    $fileId = $text;
+    if ($photo) {
+        $method = 'sendphoto';
+        $fileId = $photo[count($photo)-1]->file_id;
+    } elseif ($document) {
+        $method = 'senddocument';
+        $fileId = $document->file_id;
+    } elseif ($video) {
+        $method = 'sendvideo';
+        $fileId = $video->file_id;
+    } elseif ($audio) {
+        $method = 'sendaudio';
+        $fileId = $audio->file_id;
+    } elseif ($voice) {
+        $method = 'sendvoice';
+        $fileId = $voice->file_id;
+    } elseif ($sticker) {
+        $method = 'sendsticker';
+        $fileId = $sticker->file_id;
+    }
+
+    $stabilizing = $botData['stabilizing'];
+    $directing = $botData['directing'];
+
+    $filename = 'broadcast_' . time() . '.php';
+    $fileUrl = (isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'] . dirname($_SERVER['SCRIPT_NAME']) . '/' . $filename;
+
+    $broadcastMsg = bot('sendMessage', ['chat_id' => $chatId, 'text' => "⏳ جاري بدء الإذاعة...", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'متابعة', 'url' => $fileUrl]]]])]);
+
+    $code = generateBroadcastCode($targets, $stabilizing, $directing, $fromId, $messageId, $chatId, $fileId, $caption, $method, $broadcastMsg->result->message_id);
+    file_put_contents($filename, $code);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    shell_exec("nohup php {$filename} > /dev/null 2>&1 &");
+    exit;
+}
+
+if ($text == '/start' || $data == 'back2') {
+    $method = $data ? 'editMessageText' : 'sendMessage';
+    $userUploadCount = $botData['from_php'][$fromId] ?? 0;
+    $totalUploads = $botData['file'] ?? 0;
+    $totalUsers = $statsData['stats']['total_users'] ?? 0;
+    $currentFolder = $botData['from_folder'] ?? 'bots';
+    $msg = "مرحباً بك [{$firstName}](tg://openmessage?user_id={$fromId})\nايدي: `{$fromId}`\n— — — — — — — — — — —\n⭐ عضو VIP\n\n📁 الفولدر الحالي: {$currentFolder}\n📄 ملفاتك المرفوعة: {$userUploadCount}\n👥 عدد المستخدمين: {$totalUsers}\n📊 إجمالي المرفوعات: {$totalUploads}";
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => '🔄 تحديث البوت', 'callback_data' => 'refr'], ['text' => '📊 إحصائيات الملفات', 'callback_data' => 'nas']],
+        [['text' => '📨 التواصل مع الدعم', 'callback_data' => 'contact']],
+        [['text' => '📁 إنشاء فولدر', 'callback_data' => 'Create_folder'], ['text' => '🎯 تعيين فولدر الرفع', 'callback_data' => 'set_flowr']],
+        [['text' => '⚙️ حاجاتك', 'callback_data' => 'show']],
+        [['text' => '📝 تعديل ملف', 'callback_data' => 'Editfile']]
+    ]]);
+    bot($method, ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $msg, 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'nas') {
+    $msg = "📊 *إحصائيات الملفات*\n\n";
+    $msg .= "• إجمالي الملفات: {$botData['file']}\n";
+    $msg .= "• ملفات PHP: {$botData['php']}\n";
+    $msg .= "• ملفات JSON: {$botData['json']}\n";
+    $msg .= "• ملفات TXT: {$botData['text']}\n";
+    $msg .= "• ملفات تحتوي على توكن تليجرام: {$botData['Info_uploads']['telegram']}\n";
+    $msg .= "• ملفات لا تحتوي: {$botData['Info_uploads']['not_telegram']}\n";
+    $msg .= "• ملفات بها CURL: {$botData['Info_uploads']['curl']}\n";
+    $msg .= "• ملفات PHP محظورة: {$botData['php_ban']}\n";
+    $msg .= "• ملفات JSON محظورة: {$botData['json_ban']}\n";
+    $msg .= "• ملفات TXT محظورة: {$botData['text_ban']}";
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $msg, 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'back2']]]])]);
+    exit;
+}
+
+if ($data == 'refr') {
+    for ($i = 0; $i <= 10; $i++) {
+        bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "♻️ جاري التحديث...\n" . progress(10, $i), 'parse_mode' => 'markdown']);
+        sleep(0.3);
+    }
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم التحديث بنجاح."]);
+    sleep(1);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "مرحباً بك [{$firstName}](tg://openmessage?user_id={$fromId})\nايدي: `{$fromId}`\n— — — — — — — — — — —\n⭐ عضو VIP\n\n📁 الفولدر الحالي: {$currentFolder}\n📄 ملفاتك المرفوعة: {$userUploadCount}\n👥 عدد المستخدمين: {$totalUsers}\n📊 إجمالي المرفوعات: {$totalUploads}", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [
+        [['text' => '🔄 تحديث البوت', 'callback_data' => 'refr'], ['text' => '📊 إحصائيات الملفات', 'callback_data' => 'nas']],
+        [['text' => '📨 التواصل مع الدعم', 'callback_data' => 'contact']],
+        [['text' => '📁 إنشاء فولدر', 'callback_data' => 'Create_folder'], ['text' => '🎯 تعيين فولدر الرفع', 'callback_data' => 'set_flowr']],
+        [['text' => '⚙️ حاجاتك', 'callback_data' => 'show']],
+        [['text' => '📝 تعديل ملف', 'callback_data' => 'Editfile']]
+    ]])]);
+    exit;
+}
+
+function progress($total, $current) {
+    $bar = str_repeat('_', $current) . '👨‍🦼‍➡️' . str_repeat('_', $total - $current - 1);
+    return $bar;
+}
+
+if ($data == 'Create_folder') {
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "📁 أرسل اسم المجلد الجديد.", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'back2']]]])]);
+    $appData['mode'][$fromId]['mode'] = 'Create_folder';
+    saveAll();
+    exit;
+}
+
+if ($text && ($appData['mode'][$fromId]['mode'] ?? '') == 'Create_folder') {
+    $folderName = trim($text);
+    $path = getUserFolder($fromId) . $folderName;
+    if (!is_dir($path)) {
+        mkdir($path, 0777, true);
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم إنشاء المجلد {$folderName} بنجاح."]);
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ المجلد موجود بالفعل."]);
+    }
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'set_flowr') {
+    if ($botData['folder'] == 'off') {
+        bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⛔ المالك عطل هذه الميزة.", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'back2']]]])]);
+        exit;
+    }
+    $folders = getFoldersList($fromId);
+    if (empty($folders)) {
+        bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⚠️ لا توجد مجلدات متاحة.", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'back2']]]])]);
+        exit;
+    }
+    $keyboard = [];
+    foreach ($folders as $folder) {
+        $keyboard[] = [['text' => $folder, 'callback_data' => "select_folder:{$folder}"]];
+    }
+    $keyboard[] = [['text' => 'رجوع', 'callback_data' => 'back2']];
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "📁 اختر المجلد لتعيينه كفولدر رفع.", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => $keyboard])]);
+    exit;
+}
+
+if (strpos($data, 'select_folder:') === 0) {
+    $selected = str_replace('select_folder:', '', $data);
+    $botData['from_folder'] = $selected;
+    saveAll();
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "✅ تم تعيين فولدر الرفع إلى:\n`{$selected}`", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'back2']]]])]);
+    exit;
+}
+
+if ($data == 'contact') {
+    bot('sendMessage', ['chat_id' => $chatId, 'text' => "📨 أرسل رسالتك للدعم الفني."]);
+    $appData['mode'][$fromId]['mode'] = 'contact';
+    saveAll();
+    exit;
+}
+
+if ($text && ($appData['mode'][$fromId]['mode'] ?? '') == 'contact') {
+    $forward = bot('sendMessage', ['chat_id' => ADMIN_ID, 'text' => "📩 رسالة من [{$firstName}](tg://user?id={$fromId})\nايدي: {$fromId}\n\nالنص:\n{$text}", 'parse_mode' => 'markdown']);
+    $appData['twasol'][$forward->result->message_id] = $fromId;
+    saveAll();
+    bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم إرسال رسالتك، سيتم الرد قريباً."]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'show') {
+    $items = getFileList($fromId);
+    if (empty($items)) {
+        bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "📂 لا توجد ملفات أو مجلدات.", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'back2']]]])]);
+        exit;
+    }
+    $totalFolders = 0;
+    $totalFiles = 0;
+    $list = '';
+    foreach ($items as $item) {
+        if (strpos($item, '📂') !== false) $totalFolders++;
+        else $totalFiles++;
+        $list .= "- {$item}\n";
+    }
+    $display = implode("\n", array_slice(explode("\n", $list), 0, 10));
+    $msg = "*المجلدات:* {$totalFolders}\n*الملفات:* {$totalFiles}\n\n{$display}";
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => $msg, 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'back2']]]])]);
+    exit;
+}
+
+if ($data == 'abdo') {
+    $check = $botData['check'] === 'on' ? 'مفعل ✅' : 'معطل ❌';
+    $upload = $botData['upload'] === 'on' ? 'مفعل ✅' : 'معطل ❌';
+    $folder = $botData['folder'] === 'on' ? 'مفعل ✅' : 'معطل ❌';
+    $numberfiles = $botData['numberfiles'] ?? 7;
+    $numberban = $botData['numberban'] ?? 3;
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => "فحص الملفات {$check}", 'callback_data' => 'check']],
+        [['text' => "رفع الملفات {$upload}", 'callback_data' => 'upload']],
+        [['text' => "إنشاء فولدرات {$folder}", 'callback_data' => 'folder']],
+        [['text' => 'المحظورين من الرفع', 'callback_data' => 'banall']],
+        [['text' => "عدد الملفات {$numberfiles}", 'callback_data' => 'set_numberfiles'], ['text' => "عدد التحذيرات {$numberban}", 'callback_data' => 'set_numberban']],
+        [['text' => 'الاعدادات العامة', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "⚙️ إعدادات بوت الرفع\n" . OWNER_TEXT, 'parse_mode' => 'markdown', 'reply_markup' => $markup]);
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($data == 'check' || $data == 'upload' || $data == 'folder') {
+    $botData[$data] = $botData[$data] === 'on' ? 'off' : 'on';
+    saveAll();
+    bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => "تم " . ($botData[$data] === 'on' ? 'تفعيل' : 'تعطيل')]);
+    $check = $botData['check'] === 'on' ? 'مفعل ✅' : 'معطل ❌';
+    $upload = $botData['upload'] === 'on' ? 'مفعل ✅' : 'معطل ❌';
+    $folder = $botData['folder'] === 'on' ? 'مفعل ✅' : 'معطل ❌';
+    $numberfiles = $botData['numberfiles'] ?? 7;
+    $numberban = $botData['numberban'] ?? 3;
+    $markup = json_encode(['inline_keyboard' => [
+        [['text' => "فحص الملفات {$check}", 'callback_data' => 'check']],
+        [['text' => "رفع الملفات {$upload}", 'callback_data' => 'upload']],
+        [['text' => "إنشاء فولدرات {$folder}", 'callback_data' => 'folder']],
+        [['text' => 'المحظورين من الرفع', 'callback_data' => 'banall']],
+        [['text' => "عدد الملفات {$numberfiles}", 'callback_data' => 'set_numberfiles'], ['text' => "عدد التحذيرات {$numberban}", 'callback_data' => 'set_numberban']],
+        [['text' => 'الاعدادات العامة', 'callback_data' => 'bot']]
+    ]]);
+    bot('editMessageReplyMarkup', ['chat_id' => $chatId, 'message_id' => $messageId, 'reply_markup' => $markup]);
+    exit;
+}
+
+if ($data == 'set_numberfiles' || $data == 'set_numberban') {
+    $label = $data == 'set_numberfiles' ? 'الملفات' : 'التحذيرات';
+    bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $messageId, 'text' => "أرسل العدد الجديد لـ {$label}.", 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'إلغاء', 'callback_data' => 'abdo']]]])]);
+    $appData['mode'][$fromId]['mode'] = $data;
+    saveAll();
+    exit;
+}
+
+if ($text && in_array($appData['mode'][$fromId]['mode'] ?? '', ['set_numberfiles', 'set_numberban'])) {
+    $mode = $appData['mode'][$fromId]['mode'];
+    if (is_numeric($text) && intval($text) > 0) {
+        $key = $mode == 'set_numberfiles' ? 'numberfiles' : 'numberban';
+        $botData[$key] = intval($text);
+        saveAll();
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم تعيين العدد الجديد: {$text}", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'رجوع', 'callback_data' => 'abdo']]]])]);
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ يرجى إرسال رقم صحيح موجب."]);
+    }
+    $appData['mode'][$fromId]['mode'] = null;
+    saveAll();
+    exit;
+}
+
+if ($document && $botData['upload'] == 'on') {
+    if ($botData['premium'] == 'on' && !isAdmin($fromId) && !isVip($fromId)) {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "💰 هذا البوت مدفوع، يرجى الاشتراك لرفع الملفات."]);
+        exit;
+    }
+    if (isset($botData['from_php'][$fromId]) && $botData['from_php'][$fromId] >= $botData['numberfiles']) {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "⚠️ لقد تجاوزت الحد الأقصى للملفات المسموح بها ({$botData['numberfiles']}).\nعدد ملفاتك: {$botData['from_php'][$fromId]}", 'reply_markup' => json_encode(['inline_keyboard' => [[['text' => 'حذف جميع ملفاتك', 'callback_data' => "delete_file_all|{$fromId}"]]]])]);
+        exit;
+    }
+
+    $fileInfo = bot('getFile', ['file_id' => $documentFileId]);
+    $fileUrl = "https://api.telegram.org/file/bot" . API_KEY . "/" . $fileInfo->result->file_path;
+    $content = file_get_contents($fileUrl);
+    $tempFile = "check/{$chatId}.php";
+    file_put_contents($tempFile, $content);
+
+    $extension = pathinfo($documentFileName, PATHINFO_EXTENSION);
+    $isMalicious = false;
+    $banMessage = '';
+
+    if ($extension == 'php') {
+        $msg = bot('sendMessage', ['chat_id' => $chatId, 'text' => "⏳ جاري فحص الملف..."]);
+        if (checkFileContent($content)) {
+            $isMalicious = true;
+            $banMessage = generateBanMessage($fromId);
+            $botData['from_ban'][$fromId] = ($botData['from_ban'][$fromId] ?? 0) + 1;
+            $botData['php_ban']++;
+            $botData['ban']++;
+            saveAll();
+            bot('sendMessage', ['chat_id' => ADMIN_ID, 'text' => "*⚠️ محاولة اختراق*\nمن: [{$firstName}](tg://user?id={$fromId})\nايدي: {$fromId}", 'parse_mode' => 'markdown']);
+        } else {
+            $botData['from_php'][$fromId] = ($botData['from_php'][$fromId] ?? 0) + 1;
+            $botData['php']++;
+            $botData['file']++;
+            $path = getCurrentFolder($fromId) . '/' . $documentFileName;
+            file_put_contents($path, $content);
+            if (strpos($content, 'api.telegram.org') !== false) {
+                $botData['Info_uploads']['telegram']++;
+            } else {
+                $botData['Info_uploads']['not_telegram']++;
+            }
+            if (strpos($content, 'curl_') !== false) {
+                $botData['Info_uploads']['curl']++;
+            }
+            saveAll();
+            $link = getFileLink($documentFileName, $fromId);
+            $token = extractToken($content);
+            $cr = rand(9999, 999999);
+            $botData['Info_from_upload'][$cr]['url'] = $path;
+            if ($token) {
+                $botData['Info_from_upload'][$cr]['token'] = $token;
+                $botData['Info_from_upload'][$cr]['webhook'] = urlencode($link);
+                saveAll();
+                $keyboard = [
+                    [['text' => 'تعيين ويب هوك', 'callback_data' => "up_webhook|{$cr}"], ['text' => 'حذف ويب هوك', 'callback_data' => "del_webhook|{$cr}"]],
+                    [['text' => 'حذف الملف', 'callback_data' => "delete_file|{$cr}"]],
+                    [['text' => 'معلومات البوت', 'callback_data' => "information_bot|{$cr}"]],
+                    [['text' => 'حذف جميع ملفاتي', 'callback_data' => "delete_file_all|{$fromId}"]]
+                ];
+            } else {
+                $keyboard = [
+                    [['text' => 'حذف الملف', 'callback_data' => "delete_file|{$cr}"]],
+                    [['text' => 'حذف جميع ملفاتي', 'callback_data' => "delete_file_all|{$fromId}"]]
+                ];
+            }
+            $msgText = "✅ تم رفع الملف بنجاح\n📁 المسار: {$botData['from_folder']}\n🔗 رابط الويب هوك: `" . ($token ? $link : 'لا يوجد') . "`\n🔑 التوكن: `" . ($token ? $token : 'لا يوجد') . "`";
+            bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $msg->result->message_id, 'text' => $msgText, 'parse_mode' => 'markdown', 'reply_markup' => json_encode(['inline_keyboard' => $keyboard])]);
+            bot('sendMessage', ['chat_id' => ADMIN_ID, 'text' => "📤 تم رفع ملف من [{$firstName}](tg://user?id={$fromId})\nالمسار: {$botData['from_folder']}\nالرابط: {$link}\nالتوكن: `{$token}`", 'parse_mode' => 'markdown']);
+        }
+        unlink($tempFile);
+        if ($isMalicious) {
+            bot('editMessageText', ['chat_id' => $chatId, 'message_id' => $msg->result->message_id, 'text' => $banMessage, 'parse_mode' => 'markdown']);
+        }
+    } elseif ($extension == 'json') {
+        $data = json_decode($content, true);
+        if ($data === null) {
+            bot('sendMessage', ['chat_id' => $chatId, 'text' => "❌ ملف JSON غير صالح."]);
+            exit;
+        }
+        $suspicious = ['ZipArchive', 'zip', 'eval', '.php', 'base64', 'base64_decode', 'github', 'public function create', 'include', 'shell', 'system', 'timestamper', '__FILE__'];
+        foreach ($data as $key => $value) {
+            foreach ($suspicious as $word) {
+                if (strpos($value, $word) !== false || strpos($key, $word) !== false) {
+                    $botData['from_ban'][$fromId] = ($botData['from_ban'][$fromId] ?? 0) + 1;
+                    $botData['json_ban']++;
+                    $botData['ban']++;
+                    saveAll();
+                    bot('sendMessage', ['chat_id' => ADMIN_ID, 'text' => "*⚠️ محاولة اختراق (JSON)*\nمن: [{$firstName}](tg://user?id={$fromId})", 'parse_mode' => 'markdown']);
+                    bot('sendMessage', ['chat_id' => $chatId, 'text' => generateBanMessage($fromId), 'parse_mode' => 'markdown']);
+                    exit;
+                }
+            }
+        }
+        $path = getCurrentFolder($fromId) . '/' . $documentFileName;
+        file_put_contents($path, $content);
+        $botData['from_json'][$fromId] = ($botData['from_json'][$fromId] ?? 0) + 1;
+        $botData['json']++;
+        $botData['file']++;
+        saveAll();
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم رفع ملف JSON بنجاح."]);
+    } elseif ($extension == 'txt') {
+        $suspicious = ['ZipArchive', 'zip', 'eval', '.php', 'base64', 'base64_decode', 'github', 'public function create', 'include', 'shell', 'system', 'timestamper', '__FILE__'];
+        foreach ($suspicious as $word) {
+            if (strpos($content, $word) !== false) {
+                $botData['from_ban'][$fromId] = ($botData['from_ban'][$fromId] ?? 0) + 1;
+                $botData['text_ban']++;
+                $botData['ban']++;
+                saveAll();
+                bot('sendMessage', ['chat_id' => ADMIN_ID, 'text' => "*⚠️ محاولة اختراق (TXT)*\nمن: [{$firstName}](tg://user?id={$fromId})", 'parse_mode' => 'markdown']);
+                bot('sendMessage', ['chat_id' => $chatId, 'text' => generateBanMessage($fromId), 'parse_mode' => 'markdown']);
+                exit;
+            }
+        }
+        $path = getCurrentFolder($fromId) . '/' . $documentFileName;
+        file_put_contents($path, $content);
+        $botData['from_text'][$fromId] = ($botData['from_text'][$fromId] ?? 0) + 1;
+        $botData['text']++;
+        $botData['file']++;
+        saveAll();
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => "✅ تم رفع ملف TXT بنجاح."]);
+    }
+}
+
+function generateBanMessage($userId) {
+    global $botData;
+    $limit = $botData['numberban'] ?? 3;
+    $warnings = $botData['from_ban'][$userId] ?? 0;
+    $remaining = $limit - $warnings;
+    if ($remaining <= 0) {
+        return "🚫 تم حظرك نهائياً لتجاوزك عدد التحذيرات المسموح به.";
+    }
+    return "⚠️ تحذير: محاولة رفع ملف مخالف.\nتبقى لديك {$remaining} تحذير من {$limit}.";
+}
+
+function extractToken($content) {
+    if (preg_match('/(\d{6,14}:[\w-]{35,75})/', $content, $matches)) {
+        $token = $matches[0];
+        $result = file_get_contents("https://api.telegram.org/bot{$token}/getme");
+        if ($result !== false) {
+            return $token;
+        }
+    }
+    return null;
+}
+
+$actionParts = explode('|', $data ?? '');
+$command = $actionParts[0] ?? '';
+$param = $actionParts[1] ?? null;
+
+if ($command == 'up_webhook') {
+    $cr = $param;
+    $token = $botData['Info_from_upload'][$cr]['token'] ?? null;
+    $url = $botData['Info_from_upload'][$cr]['webhook'] ?? null;
+    if ($token && $url) {
+        file_get_contents("https://api.telegram.org/bot{$token}/setwebhook?url={$url}");
+        bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '✅ تم تعيين ويب هوك', 'show_alert' => true]);
+        sendMessage("✅ تم تعيين ويب هوك بنجاح.\n" . OWNER_TEXT, $fromId, $token);
+    } else {
+        bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '❌ خطأ في البيانات', 'show_alert' => true]);
+    }
+    exit;
+}
+
+if ($command == 'del_webhook') {
+    $cr = $param;
+    $token = $botData['Info_from_upload'][$cr]['token'] ?? null;
+    if ($token) {
+        file_get_contents("https://api.telegram.org/bot{$token}/deleteWebhook");
+        bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '✅ تم حذف ويب هوك', 'show_alert' => true]);
+        sendMessage("✅ تم حذف ويب هوك بنجاح.\n" . OWNER_TEXT, $fromId, $token);
+    } else {
+        bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '❌ خطأ في البيانات', 'show_alert' => true]);
+    }
+    exit;
+}
+
+if ($command == 'information_bot') {
+    $cr = $param;
+    $token = $botData['Info_from_upload'][$cr]['token'] ?? null;
+    if ($token) {
+        $res = file_get_contents("https://api.telegram.org/bot{$token}/getMe");
+        $info = json_decode($res);
+        if ($info && $info->ok) {
+            $bot = $info->result;
+            $msg = "🤖 *معلومات البوت*\n";
+            $msg .= "الاسم: {$bot->first_name}\n";
+            $msg .= "اليوزر: @{$bot->username}\n";
+            $msg .= "ايدي: {$bot->id}\n";
+            $msg .= "خاص: " . ($bot->can_join_groups ? 'عام' : 'خاص');
+            bot('sendMessage', ['chat_id' => $chatId, 'text' => $msg, 'parse_mode' => 'markdown']);
+        } else {
+            bot('sendMessage', ['chat_id' => $chatId, 'text' => '❌ توكن غير صحيح']);
+        }
+    } else {
+        bot('sendMessage', ['chat_id' => $chatId, 'text' => '❌ لا يوجد توكن لهذا الملف']);
+    }
+    exit;
+}
+
+if ($command == 'delete_file') {
+    $cr = $param;
+    $path = $botData['Info_from_upload'][$cr]['url'] ?? null;
+    if ($path && file_exists($path)) {
+        unlink($path);
+        unset($botData['Info_from_upload'][$cr]);
+        if (isset($botData['from_php'][$fromId])) {
+            $botData['from_php'][$fromId]--;
+        }
+        saveAll();
+        bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '✅ تم حذف الملف', 'show_alert' => true]);
+    } else {
+        bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '❌ الملف غير موجود', 'show_alert' => true]);
+    }
+    exit;
+}
+
+if ($command == 'delete_file_all') {
+    $userId = $param;
+    $folder = getUserFolder($userId);
+    if (is_dir($folder)) {
+        if (deleteFolderRecursive($folder)) {
+            bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '✅ تم حذف جميع ملفاتك', 'show_alert' => true]);
+        } else {
+            bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '❌ حدث خطأ أثناء الحذف', 'show_alert' => true]);
+        }
+    } else {
+        bot('answerCallbackQuery', ['callback_query_id' => $callback->id, 'text' => '❌ لا توجد ملفات', 'show_alert' => true]);
+    }
+    exit;
+}
+
+saveAll();
